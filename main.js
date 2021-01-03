@@ -6,6 +6,7 @@ const mysql = require('mysql2/promise')
 const app = express();
 const secureEnv = require('secure-env')
 const PORT = parseInt(process.argv[2]) || parseInt(process.env.PORT) || 3000
+
 global.env = secureEnv({secret:'mySecretPassword'})
 
 
@@ -78,16 +79,62 @@ passport.use(new LocalStrategy(
 app.use(bodyParser.urlencoded({extended: true}))
 app.use(passport.initialize());
 
+// start the app
+startApp(app, pool)
+
+
+const jwt = require('jsonwebtoken');
+
 app.post('/login', passport.authenticate('local', {session: false}),
     
     // this middleware is called if auth using the local strategy is successful
     (req, resp) => {
-        console.info(req.user)
 
-        resp.status(200)
-        resp.json({result: 'ok'})	
+        const currTime = (new Date()).getTime()
+        
+        const token = jwt.sign({ 
+            sub: req.user.username,
+            iss: req.user.password,
+            iat: currTime,
+            // exp: currTime + (1000 *60 *60),
+            exp: currTime + (5000),
+            data: { email: req.user.username }
+        }, 'secret');
+
+        resp.status(201).json({
+            access_token: token,
+            token_type: 'Bearer', 
+            expire_in: 1800
+        });
+        
+
     }    
 );
 
-// start the app
-startApp(app, pool)
+app.get('/customer', 
+
+    (req, resp, next) => {
+        const authHeader = req.get('Authorization');
+        console.info(authHeader)
+        if (!(authHeader && authHeader.startsWith('Bearer'))) {
+
+            resp.status(403).json({error: 'Not authenticated'}); 
+            return;
+        }
+
+        const token = authHeader.substring('Bearer'.length);
+        try {
+            console.info(token)
+            req.jwtToken = jwt.verify(token, 'secret');
+            next();
+        } catch (e) {
+            resp.status(403).json({error: e}); return;
+        }
+    },
+
+    (req, resp) => {
+        
+        console.info('token still valid ', req.jwtToken)
+    }
+
+)        
